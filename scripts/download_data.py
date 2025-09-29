@@ -20,8 +20,11 @@ except ImportError as e:
 
 
 def download_dataset() -> None:
-    dataset = "johnsmith88/heart-disease-dataset"
-    file_path = "heart.csv"
+    """dataset = "redwankarimsony/heart-disease-data"
+    file_path = "heart_disease_uci.csv" """
+    
+    dataset = "sid321axn/heart-statlog-cleveland-hungary-final"
+    file_path = "heart_statlog_cleveland_hungary_final.csv"
     
     """
     For the Cleveland dataset, use:
