@@ -1,0 +1,29 @@
+
+# Required Python packages for the Heart Disease Classification project
+#
+# This list enumerates all external libraries imported across the
+# project's source code, scripts and notebooks.  Each package is
+# specified without a pinned version to allow installation of the
+# latest compatible release.  Feel free to pin versions if you need
+# reproducible environments.
+
+# Core numerical and data analysis libraries
+numpy
+pandas
+
+# Machine‑learning frameworks
+scikit-learn
+lightgbm
+xgboost
+
+# Data processing and configuration
+PyYAML
+joblib
+
+# Visualisation and statistics
+matplotlib
+seaborn
+scipy
+
+# Dataset utilities (used by scripts/download_data.py and notebooks)
+kagglehub[pandas-datasets]

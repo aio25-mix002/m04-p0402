@@ -1,0 +1,1 @@
+"""Application layer for the heart disease classification project."""
