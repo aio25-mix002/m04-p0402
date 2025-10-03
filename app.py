@@ -466,6 +466,8 @@ def main() -> None:
             "Support Vector Machine (RBF)": "svm_rbf",
             "AdaBoost": "adaboost",
             "Gradient Boosting": "gradient_boosting",
+            "LightGBM (LGBM)": "lightgbm",
+            "XGBoost": "xgboost",
         }
         algo_label = st.selectbox("Choose algorithm", list(algo_map.keys()))
         if st.button("Train", key="train_button"):
