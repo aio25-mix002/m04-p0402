@@ -248,19 +248,18 @@ def train_selected_model(algo: str, train_set: tuple, test_set: tuple, val_set: 
         estimator = LGBMClassifier(
             random_state=42,
             objective="binary",
-            n_jobs=-1
-    )
-    param_grid = {
-        "model__n_estimators": [200, 500, 800],
-        "model__learning_rate": [0.01, 0.05, 0.1],
-        "model__num_leaves": [31, 63, 127],
-        "model__max_depth": [-1, 5, 10],
-        "model__min_child_samples": [10, 20, 40],
-        "model__subsample": [0.7, 0.9, 1.0],          # bagging_fraction
-        "model__colsample_bytree": [0.7, 0.9, 1.0],   # feature_fraction
-        "model__reg_alpha": [0.0, 0.1, 1.0],
-        "model__reg_lambda": [0.0, 0.1, 1.0],
-    }
+            n_jobs=-1)
+        param_grid = {
+            "model__n_estimators": [200, 500, 800],
+            "model__learning_rate": [0.01, 0.05, 0.1],
+            "model__num_leaves": [31, 63, 127],
+            "model__max_depth": [-1, 5, 10],
+            "model__min_child_samples": [10, 20, 40],
+            "model__subsample": [0.7, 0.9, 1.0],          # bagging_fraction
+            "model__colsample_bytree": [0.7, 0.9, 1.0],   # feature_fraction
+            "model__reg_alpha": [0.0, 0.1, 1.0],
+            "model__reg_lambda": [0.0, 0.1, 1.0],
+        }
 
     elif algo in {"xgboost", "xgb", "xgb_classifier"}:
         # pip install xgboost
