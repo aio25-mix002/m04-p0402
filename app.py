@@ -16,6 +16,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, GradientBoostingClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
 from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score, roc_auc_score
 import matplotlib.pyplot as plt
