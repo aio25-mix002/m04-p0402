@@ -243,6 +243,47 @@ def train_selected_model(algo: str, train_set: tuple, test_set: tuple, val_set: 
             "model__learning_rate": [0.01, 0.1, 0.2],
             "model__max_depth": [3, 5],
         }
+    elif algo in {"lightgbm", "lgbm", "lgbm_classifier"}:
+        # pip install lightgbm
+        estimator = LGBMClassifier(
+            random_state=42,
+            objective="binary",
+            n_jobs=-1
+    )
+    param_grid = {
+        "model__n_estimators": [200, 500, 800],
+        "model__learning_rate": [0.01, 0.05, 0.1],
+        "model__num_leaves": [31, 63, 127],
+        "model__max_depth": [-1, 5, 10],
+        "model__min_child_samples": [10, 20, 40],
+        "model__subsample": [0.7, 0.9, 1.0],          # bagging_fraction
+        "model__colsample_bytree": [0.7, 0.9, 1.0],   # feature_fraction
+        "model__reg_alpha": [0.0, 0.1, 1.0],
+        "model__reg_lambda": [0.0, 0.1, 1.0],
+    }
+
+    elif algo in {"xgboost", "xgb", "xgb_classifier"}:
+        # pip install xgboost
+        estimator = XGBClassifier(
+            random_state=42,
+            objective="binary:logistic",
+            n_estimators=200,
+            tree_method="hist",        # nhanh & ổn định
+            eval_metric="auc",         # tránh warning
+            n_jobs=-1,
+            use_label_encoder=False
+        )
+        param_grid = {
+            "model__n_estimators": [200, 500, 800],
+            "model__learning_rate": [0.01, 0.05, 0.1],
+            "model__max_depth": [3, 5, 8],
+            "model__subsample": [0.7, 0.9, 1.0],
+            "model__colsample_bytree": [0.7, 0.9, 1.0],
+            "model__min_child_weight": [1, 3, 5],
+            "model__gamma": [0.0, 0.1, 1.0],
+            # Nếu dữ liệu mất cân bằng, có thể thêm:
+            # "model__scale_pos_weight": [1, 2, 5, 10],
+        }
     else:
         raise ValueError(f"Unsupported algorithm: {algo}")
     
