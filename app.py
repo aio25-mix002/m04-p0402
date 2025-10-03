@@ -160,9 +160,9 @@ def preprocessor(train_set: tuple, test_set: tuple, val_set: tuple=None) -> Colu
     
     if val_set:
         X_val_processed = raw_pipeline.transform(X_val)
-        return (X_train_processed, y_train), (X_val_processed, y_val), (X_test_processed, y_test)
+        return (X_train_processed, y_train), (X_val_processed, y_val), (X_test_processed, y_test), raw_pipeline
     
-    return (X_train_processed, y_train), (X_test_processed, y_test)
+    return (X_train_processed, y_train), (X_test_processed, y_test), raw_pipeline
 
 
 def train_selected_model(algo: str, train_set: tuple, test_set: tuple, val_set: tuple = None) -> tuple[Pipeline, dict[str, float]]:
@@ -346,7 +346,8 @@ def main() -> None:
 
     df = get_dataset()
     train_set, test_set = set_split(df, val=False)
-    train_set_processed, test_set_processed = preprocessor(train_set, test_set, val_set=None)
+    train_set_processed, test_set_processed, preproc = preprocessor(train_set, test_set, val_set=None)
+    st.session_state["preproc"] = preproc
     TARGET = 'target'
     ftr_list = list(df.columns)
     ftr_list.remove(TARGET)
@@ -576,14 +577,16 @@ def main() -> None:
                 input_df = compute_ratio_features(input_df)
                 # Retrieve trained pipeline
                 pipeline: Pipeline = st.session_state["trained_pipeline"]
+                preproc: Pipeline = st.session_state["preproc"]
+                X_input = preproc.transform(input_df)
                 try:
                     # Predict probability and class
                     if hasattr(pipeline[-1], "predict_proba"):
-                        prob = pipeline.predict_proba(input_df)[0][1]
+                        prob = pipeline.predict_proba(X_input)[0][1]
                     else:
-                        score = pipeline.decision_function(input_df)[0]
+                        score = pipeline.decision_function(X_input)[0]
                         prob = 1 / (1 + np.exp(-score))
-                    pred = pipeline.predict(input_df)[0]
+                    pred = pipeline.predict(X_input)[0]
                 except Exception as e:
                     st.error(f"Prediction failed: {e}")
                 else:
@@ -606,19 +609,95 @@ def main() -> None:
     ########################################
     with tabs[3]:
         st.header("Visualisations")
-        vis_dir = Path(__file__).resolve().parent / "heart" / "artifacts" / "visualisations"
-        if not vis_dir.exists():
-            st.info("No pre‑computed visualisations found. Train the models via train.py to generate them.")
+
+        if "trained_pipeline" not in st.session_state:
+            st.info("Train a model first in the *Train Model* tab to see visualisations.")
         else:
-            images = list(vis_dir.glob("*.png"))
-            if not images:
-                st.info("No images found in visualisations directory.")
+            # Lấy model & dữ liệu test đã transform sẵn
+            pipeline: Pipeline = st.session_state["trained_pipeline"]
+            preproc: Pipeline = st.session_state["preproc"]
+            X_test_proc, y_test = test_set_processed  # đã là dữ liệu processed
+
+            # ===== ROC Curve =====
+            from sklearn.metrics import roc_curve, roc_auc_score, confusion_matrix, ConfusionMatrixDisplay
+
+            try:
+                if hasattr(pipeline[-1], "predict_proba"):
+                    y_score = pipeline.predict_proba(X_test_proc)[:, 1]
+                else:
+                    scores = pipeline.decision_function(X_test_proc)
+                    y_score = 1.0 / (1.0 + np.exp(-scores))
+                fpr, tpr, _ = roc_curve(y_test, y_score)
+                auc = roc_auc_score(y_test, y_score)
+
+                plt.figure(figsize=(5, 4))
+                plt.plot(fpr, tpr, label=f"ROC AUC = {auc:.3f}")
+                plt.plot([0, 1], [0, 1], linestyle="--")
+                plt.xlabel("False Positive Rate")
+                plt.ylabel("True Positive Rate")
+                plt.title("ROC Curve")
+                plt.legend(loc="lower right")
+                plt.tight_layout()
+                st.pyplot(plt.gcf())
+                plt.close()
+            except Exception as e:
+                st.warning(f"Could not draw ROC: {e}")
+
+            # ===== Confusion Matrix =====
+            try:
+                y_pred = pipeline.predict(X_test_proc)
+                cm = confusion_matrix(y_test, y_pred)
+                disp = ConfusionMatrixDisplay(confusion_matrix=cm)
+                plt.figure(figsize=(4.5, 4))
+                disp.plot(colorbar=False)
+                plt.title("Confusion Matrix")
+                plt.tight_layout()
+                st.pyplot(plt.gcf())
+                plt.close()
+            except Exception as e:
+                st.warning(f"Could not draw Confusion Matrix: {e}")
+
+            # ===== Feature Importance / Coefficients (Top-N) =====
+            try:
+                # Lấy tên feature sau khi OneHot/scale
+                # (preproc là Pipeline(['preprocess' -> ColumnTransformer(...)]))
+                feature_names = preproc["preprocess"].get_feature_names_out()
+            except Exception:
+                feature_names = None
+
+            model = pipeline[-1]
+            importances = None
+            title = None
+            try:
+                if hasattr(model, "feature_importances_"):
+                    importances = np.asarray(model.feature_importances_)
+                    title = "Feature Importance (Tree-based)"
+                elif hasattr(model, "coef_"):
+                    # Lấy độ lớn hệ số để xếp hạng
+                    importances = np.abs(np.ravel(model.coef_))
+                    title = "Absolute Coefficients (Linear Model)"
+            except Exception:
+                importances = None
+
+            if importances is not None:
+                # Ghép với tên cột (nếu có), chọn Top 20
+                if feature_names is not None and len(feature_names) == len(importances):
+                    labels = np.array(feature_names)
+                else:
+                    labels = np.array([f"f{i}" for i in range(len(importances))])
+
+                top_n = min(20, len(importances))
+                idx = np.argsort(importances)[-top_n:][::-1]
+                plt.figure(figsize=(7, 6))
+                plt.barh(range(top_n), importances[idx][::-1])
+                plt.yticks(range(top_n), labels[idx][::-1])
+                plt.xlabel("Importance")
+                plt.title(title)
+                plt.tight_layout()
+                st.pyplot(plt.gcf())
+                plt.close()
             else:
-                # Display images in a grid
-                cols = st.columns(3)
-                for idx, img_path in enumerate(images):
-                    with cols[idx % 3]:
-                        st.image(str(img_path), caption=img_path.name)
+                st.info("Current model does not expose feature importances/coefficients.")  
 
 
 if __name__ == "__main__":
