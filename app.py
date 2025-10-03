@@ -9,7 +9,7 @@ import streamlit as st
 
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, PowerTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
@@ -18,7 +18,8 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score, roc_auc_score
-
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 def compute_ratio_features(df: pd.DataFrame) -> pd.DataFrame:
     """Compute ratio features used during training.
@@ -43,32 +44,6 @@ def compute_ratio_features(df: pd.DataFrame) -> pd.DataFrame:
     if {"trestbps", "age"}.issubset(df.columns):
         df["trestbps_per_age"] = df["trestbps"] / df["age"].replace({0: np.nan})
     return df
-
-
-def build_preprocessor(numeric_cols: list[str], categorical_cols: list[str]) -> ColumnTransformer:
-    """Create a preprocessing pipeline for numeric and categorical features.
-
-    Uses median imputation and standard scaling for numeric features, and
-    most‑frequent imputation plus one‑hot encoding (dense) for categorical
-    features.  Compatible with scikit‑learn 1.1.x.
-    """
-    num_pipeline = Pipeline([
-        ("imputer", SimpleImputer(strategy="median")),
-        ("scaler", StandardScaler()),
-    ])
-    cat_pipeline = Pipeline([
-    ("imputer", SimpleImputer(strategy="most_frequent")),
-    # Đừng truyền sparse=False hay sparse_output=False
-    ("encoder", OneHotEncoder(handle_unknown="ignore")),
-])
-
-    return ColumnTransformer(
-        transformers=[
-            ("num", num_pipeline, numeric_cols),
-            ("cat", cat_pipeline, categorical_cols),
-        ]
-    )
-
 
 def load_dataset() -> pd.DataFrame:
     """Load the heart disease dataset with absolute path resolution.
@@ -96,12 +71,13 @@ def load_dataset() -> pd.DataFrame:
     else:
         # Load configuration
         config = ConfigurationManager.load(config_path)
+        
     # If config loaded, use raw_file from config; else default path
     if config is not None:
         raw_rel = config.data.raw_file
         raw_path = project_dir / raw_rel
     else:
-        raw_path = project_dir / "data" / "raw" / "heart_disease_uci.csv"
+        raw_path = project_dir / "data" / "raw" / "heart_statlog_cleveland_hungary_final_cleaned.csv"
     # Read CSV
     df = pd.read_csv(raw_path)
     # Apply ratio features if config specified; fallback to always compute
@@ -111,8 +87,83 @@ def load_dataset() -> pd.DataFrame:
         df = compute_ratio_features(df)
     return df
 
+def set_split(df: pd.DataFrame, val=False):
+    """Split train, validation, and test sets."""
+    # Separate features and target
+    target_col = "target"
+    X = df.drop(columns=[target_col])
+    y = df[target_col].astype(int)
+    
+    # Split into train/validation/test (80/10/10)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.1, stratify=y, random_state=42
+    )
+    
+    if val:
+        X_train, X_val, y_train, y_val = train_test_split(
+            X_train, y_train, test_size=0.1111, stratify=y_train, random_state=42
+        )  # 0.1111 * 0.9 ≈ 0.1
+        return (X_train, y_train), (X_val, y_val), (X_test, y_test)
+    
+    return (X_train, y_train), (X_test, y_test) 
+    
+    
 
-def train_selected_model(algo: str, df: pd.DataFrame) -> tuple[Pipeline, dict[str, float]]:
+def preprocessor(train_set: tuple, test_set: tuple, val_set: tuple=None) -> ColumnTransformer:
+    """Create a preprocessing pipeline for numeric and categorical features.
+
+    Uses median imputation and standard scaling for numeric features, and
+    most‑frequent imputation plus one‑hot encoding (dense) for categorical
+    features.  Compatible with scikit‑learn 1.1.x.
+    """
+  
+    X_train, y_train = train_set
+    X_test, y_test = test_set
+    if val_set:
+        X_val, y_val = val_set
+   # Identify numeric and categorical columns (integer features with <=10 unique values as categorical)
+    numeric_cols: list[str] = []
+    categorical_cols: list[str] = []
+    for col in X_train.columns:
+        if pd.api.types.is_numeric_dtype(X_train[col]):
+            if pd.api.types.is_integer_dtype(X_train[col]) and X_train[col].nunique() <= 10:
+                categorical_cols.append(col)
+            else:
+                numeric_cols.append(col)
+        else:
+            categorical_cols.append(col) 
+    
+    num_pipeline = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler()),
+    ])
+    cat_pipeline = Pipeline([
+    ("imputer", SimpleImputer(strategy="most_frequent")),
+    # Đừng truyền sparse=False hay sparse_output=False
+    ("encoder", OneHotEncoder(handle_unknown="ignore")),
+])
+    preprocess = ColumnTransformer(
+        transformers=[
+            ("num", num_pipeline, numeric_cols),
+            ("cat", cat_pipeline, categorical_cols),
+        ]
+    )
+     
+    raw_pipeline = Pipeline([
+    ('preprocess', preprocess),
+    ])
+    # print('145 X_train ftr col ', X_train.columns)
+    X_train_processed = raw_pipeline.fit_transform(X_train, y_train)
+    X_test_processed = raw_pipeline.transform(X_test)
+    
+    if val_set:
+        X_val_processed = raw_pipeline.transform(X_val)
+        return (X_train_processed, y_train), (X_val_processed, y_val), (X_test_processed, y_test)
+    
+    return (X_train_processed, y_train), (X_test_processed, y_test)
+
+
+def train_selected_model(algo: str, train_set: tuple, test_set: tuple, val_set: tuple = None) -> tuple[Pipeline, dict[str, float]]:
     """Train a machine‑learning model on the heart disease dataset.
 
     Parameters
@@ -132,30 +183,12 @@ def train_selected_model(algo: str, df: pd.DataFrame) -> tuple[Pipeline, dict[st
         scikit‑learn pipeline (preprocessor + estimator) and ``metrics`` is a
         dictionary of test accuracy and AUC.
     """
-    # Separate features and target
-    target_col = "target"
-    X = df.drop(columns=[target_col])
-    y = df[target_col].astype(int)
-    # Identify numeric and categorical columns (integer features with <=10 unique values as categorical)
-    numeric_cols: list[str] = []
-    categorical_cols: list[str] = []
-    for col in X.columns:
-        if pd.api.types.is_numeric_dtype(X[col]):
-            if pd.api.types.is_integer_dtype(X[col]) and X[col].nunique() <= 10:
-                categorical_cols.append(col)
-            else:
-                numeric_cols.append(col)
-        else:
-            categorical_cols.append(col)
-    # Split into train/validation/test (80/10/10)
-    X_temp, X_test, y_temp, y_test = train_test_split(
-        X, y, test_size=0.1, stratify=y, random_state=42
-    )
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_temp, y_temp, test_size=0.1111, stratify=y_temp, random_state=42
-    )  # 0.1111 * 0.9 ≈ 0.1
+    
     # Build preprocessing
-    preprocessor = build_preprocessor(numeric_cols, categorical_cols)
+    X_train, y_train = train_set
+    # X_val, y_val = val_set
+    X_test, y_test = test_set
+    
     # Define algorithm and parameter grid
     algo = algo.lower()
     estimator: any
@@ -212,14 +245,15 @@ def train_selected_model(algo: str, df: pd.DataFrame) -> tuple[Pipeline, dict[st
         }
     else:
         raise ValueError(f"Unsupported algorithm: {algo}")
+    
     # Build full pipeline
     pipeline = Pipeline([
-        ("preprocessor", preprocessor),
+        # ("preprocessor", preprocessor),
         ("model", estimator),
     ])
     # Grid search
     gs = GridSearchCV(
-        pipeline,
+        estimator=pipeline,  
         param_grid=param_grid,
         cv=3,
         scoring="roc_auc",
@@ -228,6 +262,7 @@ def train_selected_model(algo: str, df: pd.DataFrame) -> tuple[Pipeline, dict[st
     )
     gs.fit(X_train, y_train)
     best_pipeline: Pipeline = gs.best_estimator_
+    
     # Evaluate on validation set (not used but can be shown)
     # Evaluate on test set
     y_pred = best_pipeline.predict(X_test)
@@ -268,7 +303,14 @@ def main() -> None:
         return load_dataset()
 
     df = get_dataset()
-
+    train_set, test_set = set_split(df, val=False)
+    train_set_processed, test_set_processed = preprocessor(train_set, test_set, val_set=None)
+    TARGET = 'target'
+    ftr_list = list(df.columns)
+    ftr_list.remove(TARGET)
+    numeric_cols = ['age','trestbps','chol','thalach','oldpeak']
+    categorical_cols = ['sex','cp','fbs','restecg','exang','slope','ca','thal']
+    
     ########################################
     # Overview Tab
     ########################################
@@ -281,7 +323,92 @@ def main() -> None:
         st.subheader("Target variable distribution")
         target_counts = df["target"].value_counts().rename({0: "No Disease", 1: "Disease"})
         st.bar_chart(target_counts)
+        
+        # EDA
+        st.subheader("Exploratory Data Analysis on Train set")     
+        
+        # Gộp X_train và y_train để tiện vẽ
+        X_train, y_train = train_set
+        # st.markdown(f'X_train shape {X_train.shape}')
+        X_train = pd.DataFrame(data=X_train, columns=ftr_list)  # Create pd.DataFrame from numpy array
+        eda_df = X_train.copy()
+        eda_df[TARGET] = y_train
 
+        st.markdown('1. Distribution exploration on numeric features')
+        # Các cột numeric muốn kiểm tra
+        cols_to_plot = numeric_cols  # ['age','trestbps','chol','thalach','oldpeak']
+
+        for col in cols_to_plot:
+            plt.figure(figsize=(8,3))
+
+            # Histplot
+            plt.subplot(1,3,1)
+            sns.histplot(data=eda_df, x=col, hue=TARGET, kde=True, element="step")
+            plt.title(f"Histogram of {col} by {TARGET}")
+
+            # Boxplot
+            plt.subplot(1,3,2)
+            sns.boxplot(data=eda_df, x=TARGET, y=col)
+            plt.title(f"Boxplot of {col} by {TARGET}")
+
+            # Violinplot
+            plt.subplot(1,3,3)
+            sns.violinplot(data=eda_df, x=TARGET, y=col)
+            plt.title(f"Violinplot of {col} by {TARGET}")
+
+            plt.tight_layout()
+            st.pyplot(plt.gcf())  #plt.show()
+            plt.close()  # Close the figure to free memory
+            
+        # 2. Histogram to identify skewness
+        st.markdown('2. Transformations on numeric features')
+        # Các cột muốn kiểm tra (lấy từ numeric_cols để đồng bộ biến đã có)
+        eda_cols = [c for c in ['trestbps','chol','oldpeak','thalach'] if c in numeric_cols]
+
+        # Lấy dữ liệu train cho các cột này
+        eda_df = X_train[eda_cols].copy()
+
+        # Log-transform (log1p an toàn với 0)
+        for col in eda_cols:
+            eda_df[f"{col}_log"] = np.log1p(eda_df[col])
+
+        # Yeo-Johnson transform
+        pt = PowerTransformer(method='yeo-johnson')
+        eda_df[[f"{col}_yj" for col in eda_cols]] = pt.fit_transform(eda_df[eda_cols])
+
+        # Vẽ histplot so sánh trước/sau biến đổi
+        for col in eda_cols:
+            plt.figure(figsize=(9,3))
+
+            plt.subplot(1,3,1)
+            sns.histplot(eda_df[col], kde=True)
+            plt.title(f"Original {col} (skew={X_train[col].skew():.2f})")
+
+            plt.subplot(1,3,2)
+            sns.histplot(eda_df[f"{col}_log"], kde=True)
+            plt.title(f"Log-transform {col}")
+
+            plt.subplot(1,3,3)
+            sns.histplot(eda_df[f"{col}_yj"], kde=True)
+            plt.title(f"Yeo-Johnson {col}")
+
+            plt.tight_layout()
+            st.pyplot(plt.gcf()) 
+            plt.close()
+
+        # 3. Feature correlation matrix
+        st.markdown('3. Correlation matrix among numeric features')
+        plt.figure(figsize=(6, 5))
+        # st.markdown(eda_df)
+        corr_matrix = X_train[numeric_cols].corr(method='pearson')
+        sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f",
+                    vmin=-1, vmax=1, center=0, linewidths=.5, cbar_kws={"shrink": .8})
+        plt.title("Correlation matrix among numeric features")
+        plt.tight_layout()
+        # plt.savefig("correlation_matrix.pdf", bbox_inches="tight")
+        st.pyplot(plt.gcf())  #plt.show()
+        plt.close()
+            
     ########################################
     # Train Model Tab
     ########################################
@@ -305,7 +432,7 @@ def main() -> None:
             algo_key = algo_map[algo_label]
             with st.spinner(f"Training {algo_label}..."):
                 try:
-                    pipeline, metrics = train_selected_model(algo_key, df)
+                    pipeline, metrics = train_selected_model(algo_key, train_set_processed, test_set_processed)
                 except ValueError as e:
                     st.error(str(e))
                     pipeline, metrics = None, None
