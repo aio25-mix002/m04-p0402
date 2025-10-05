@@ -8,7 +8,7 @@ data:
     # Relative path to the raw CSV dataset (heart.csv).  If you
     # downloaded the Kaggle dataset, copy heart.csv into this
     # directory or update this path accordingly.
-    raw_file: data/raw/heart.csv
+    raw_file: data/raw/Heart_disease_cleveland_new.csv
 
     # Directories for intermediate and processed data
     interim_dir: data/interim
